@@ -1,6 +1,8 @@
 # Change Log
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-11-09
 ### Fixed
 - `swap!` is atomic: Duratom implements glimmer's `IAtomicSwap` (glimmer
   bumped to v0.1.7), so concurrent swaps no longer lose writes.
