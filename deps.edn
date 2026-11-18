@@ -9,7 +9,7 @@
          :git/sha "22350c4d047b05359a16b756b20f38ecb391a63b"}
         io.github.jolt-lang/db
         {:git/url "https://github.com/jolt-lang/db.git"
-         :git/sha "a54cc49f9ee8b6f6b0a1dd4f695a5390fedb5bfc"}}
+         :git/sha "ed872fabd76746c3a891e96665c874bf03f369d1"}}
 
  :aliases {:test {:extra-paths ["test"]
                   :main-opts ["-m" "duratom.test-runner"]}}
