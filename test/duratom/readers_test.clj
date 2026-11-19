@@ -4,7 +4,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.edn :as edn]
             [duratom.readers :refer [sorted-readers queue-reader meta-reader]]
-            [duratom.utils :as ut]))
+            [duratom.utils :as ut]
+            [jolt.fs :as fs]))
 
 (defn- round-trip [data readers]
   (let [back (edn/read-string {:readers readers} (ut/pr-str-fully data))]
@@ -49,4 +50,4 @@
       (is (= v back))
       (is (sorted? back))
       (is (= {:k 1} (meta back))))
-    (jolt.fs/delete path)))
+    (fs/delete path)))
