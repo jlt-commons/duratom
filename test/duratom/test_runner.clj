@@ -2,6 +2,7 @@
   (:require [clojure.test :as t]
             [duratom.core-test]
             [duratom.parity-test]
+            [duratom.readers-test]
             [duratom.error-handling-test]
             [duratom.api-test]))
 
@@ -9,6 +10,7 @@
   (try
     (let [result (t/run-tests 'duratom.core-test
                               'duratom.parity-test
+                              'duratom.readers-test
                               'duratom.error-handling-test
                               'duratom.api-test)]
       (when (pos? (+ (:fail result) (:error result)))

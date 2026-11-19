@@ -74,6 +74,20 @@ or under `:rw` in `duratom`:
   (`(fn [path])`, `(fn [path value])`); for SQL they convert to and from the
   column value, with `:column-type` for the table.
 
+## What the EDN format keeps
+
+The default serialization round-trips values plain EDN would lose. Requiring
+`duratom.core` (or `duratom.readers`) installs global `print-method`s, as
+jimpil/duratom does:
+
+- sorted maps and sets print as `#sorted/map {...}` / `#sorted/set #{...}`
+  and read back sorted (with the default comparator)
+- queues print as `#queue [...]`
+- metadata on the top-level value is stored as `#duratom/iobj [value meta]`
+
+`duratom.readers/default` holds the matching EDN readers for reading those
+files elsewhere. These printers apply to every `pr` in the process.
+
 ## The clojure.core reference API
 
 A duratom answers `@`, `reset!`, `swap!`, `swap-vals!`, `reset-vals!`,

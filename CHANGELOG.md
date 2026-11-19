@@ -10,6 +10,9 @@
   `set-validator!`/`get-validator` and `with-open` work on a duratom.
 - `duratom` and `duragent` multimethod constructors (`:local-file`,
   `:sqlite-db`, `:postgres-db`), `make-duragent`, and `release`.
+- Sorted maps and sets, queues and top-level metadata survive a write and read
+  (`#sorted/map`, `#sorted/set`, `#queue`, `#duratom/iobj`). The readers are in
+  `duratom.readers`.
 ### Fixed
 - A duratom refuses writes after `destroy`. A file-atom used to write its file
   again, and a sql-atom failed on its closed connection.

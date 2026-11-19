@@ -1,20 +1,28 @@
 (ns duratom.utils
   "EDN serialization and file IO shared by the duratom backends."
   (:require [clojure.edn :as edn]
+            [duratom.readers :as readers]
             [jolt.fs :as fs]))
 
 (def edn-opts
-  "EDN read options: return nil at end of input, so an empty file reads as nil."
-  {:eof nil})
+  "EDN read options: duratom's tagged readers, and nil at end of input so an
+  empty file reads as nil."
+  (assoc readers/default :eof nil))
 
 (defn pr-str-fully
   "`pr-str` with printing limits and metadata printing off, so large
-  collections serialize whole and read back as EDN."
+  collections serialize whole and read back as EDN. A value carrying metadata
+  prints as #duratom/iobj [value meta], so its metadata survives the trip
+  (only the top level's, as in jimpil/duratom)."
   [& xs]
   (binding [*print-length* nil
             *print-level*  nil
             *print-meta*   nil]
-    (apply pr-str xs)))
+    (apply pr-str (map (fn [x]
+                         (if-some [m (meta x)]
+                           (tagged-literal 'duratom/iobj [(with-meta x nil) m])
+                           x))
+                       xs))))
 
 (defn read-edn-string
   "Read one EDN value from string `s`; nil on empty input."

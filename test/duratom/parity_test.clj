@@ -50,15 +50,28 @@
       (is (= [:log {:x 1 :y 2} {:x 1 :y 2 :z 3}] (first @transitions)))
       (is (= [:log [1 2 3] [2 3]] (last @transitions))))
 
+    (f dura (partial into (sorted-set)))
+    (settle! dura)
+    (is (sorted? @dura))
+    (is (= (sorted-set 2 3) (d/backend-snapshot dura) @dura))
+    (is (sorted? (d/backend-snapshot dura)) "a sorted set reads back sorted")
+
+    (f dura #(with-meta % {:a 1 :b 2}))
+    (settle! dura)
+    (is (= (sorted-set 2 3) (d/backend-snapshot dura) @dura))
+    (is (= {:a 1 :b 2} (meta (d/backend-snapshot dura)) (meta @dura))
+        "top-level metadata is persisted")
+
     (d/destroy dura)
     (settle! dura)
 
     (testing "the value stays readable in memory after destroy"
-      (is (= [2 3] @dura)))
+      (is (sorted? @dura))
+      (is (= #{2 3} @dura)))
     (if atom?
       (is (thrown? IllegalStateException (f dura conj 4)))
       (do (f dura conj 4) (await dura)))
-    (is (= [2 3] @dura) "a released duratom/duragent takes no more writes")
+    (is (= #{2 3} @dura) "a released duratom/duragent takes no more writes")
     (is (false? (exists?)) "storage was not cleaned up")))
 
 (def init {:x 1 :y 2})
