@@ -8,10 +8,12 @@
   {:eof nil})
 
 (defn pr-str-fully
-  "`pr-str` with printing limits unbound, so large collections serialize whole."
+  "`pr-str` with printing limits and metadata printing off, so large
+  collections serialize whole and read back as EDN."
   [& xs]
   (binding [*print-length* nil
-            *print-level*  nil]
+            *print-level*  nil
+            *print-meta*   nil]
     (apply pr-str xs)))
 
 (defn read-edn-string
@@ -20,23 +22,20 @@
   (edn/read-string edn-opts s))
 
 (defn write-edn-file
-  "Serialize `data` as EDN to `path` via a temp file + atomic rename."
+  "Serialize `data` as EDN to `path`. Returns `path`."
   [path data]
-  (let [tmp (str path ".tmp")]
-    (spit tmp (pr-str-fully data))
-    (fs/move tmp path {:replace-existing true})
-    path))
+  (spit path (pr-str-fully data))
+  path)
 
-(defn edn-file-present?
+(defn file-present?
   "True when `path` exists and is non-empty, so it holds a value (nil included)."
   [path]
   (and (fs/exists? path) (pos? (fs/size path))))
 
 (defn read-edn-file
-  "Read one EDN value from `path`; nil when the file is absent or empty."
+  "Read one EDN value from `path`."
   [path]
-  (when (edn-file-present? path)
-    (read-edn-string (slurp path))))
+  (read-edn-string (slurp path)))
 
 (defn ->init
   "Resolve an initial-value spec: call a fn, force a delay, else return as-is."
