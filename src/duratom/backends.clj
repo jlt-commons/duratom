@@ -24,37 +24,61 @@
   value)."
   (stored? [backend] "True when the backend holds a persisted value, nil included."))
 
+(defn stored-state
+  "[v] when `backend` holds a value v (nil or false included), else nil."
+  [backend]
+  (let [v (load-state backend)]
+    (when (if (satisfies? StoredValue backend)
+            (or (some? v) (stored? backend))
+            (some? v))
+      [v])))
+
 ;; --- file backend -------------------------------------------------------------
 
-(defrecord FileBackend [path]
+(defrecord FileBackend [path read-fn write-fn]
   StorageBackend
-  (load-state [_] (ut/read-edn-file path))
-  (persist! [_ v] (ut/write-edn-file path v))
+  (load-state [_]
+    (when (ut/file-present? path)
+      (try (read-fn path)
+           (catch Exception e
+             (throw (ex-info (str "Unable to read data from file " path "!")
+                             {:file-path path} e))))))
+  (persist! [_ v]
+    ;; write a temp file and rename it over the target, so a crash mid-write
+    ;; never leaves a torn file behind
+    (let [tmp (str path ".tmp")]
+      (write-fn tmp v)
+      (fs/move tmp path {:replace-existing true})
+      v))
   (clear! [_] (when (fs/exists? path) (fs/delete path)) nil)
   (close-backend [_] nil)
   StoredValue
-  (stored? [_] (ut/edn-file-present? path)))
+  (stored? [_] (ut/file-present? path)))
 
 (defn file-backend
-  "A backend that persists a single EDN value to `path` on the local filesystem."
-  [path]
-  (->FileBackend path))
+  "A backend that persists a single value to `path` on the local filesystem.
+  `rw` may supply `:read` (fn [path] -> value) and `:write` (fn [path value]);
+  the default is EDN."
+  ([path] (file-backend path nil))
+  ([path {:keys [read write]}]
+   (->FileBackend path (or read ut/read-edn-file) (or write ut/write-edn-file))))
 
 ;; --- SQL backend --------------------------------------------------------------
 
-(defrecord SQLBackend [dbspec table row-id conn]
+(defrecord SQLBackend [table row-id conn read-fn write-fn]
   StorageBackend
   (load-state [_]
     (when-let [row (jdbc/fetch-one conn [(str "select value from " table " where id = ?") row-id])]
-      (ut/read-edn-string (:value row))))
+      (read-fn (:value row))))
   (persist! [_ v]
-    (let [s (ut/pr-str-fully v)
-          n (jdbc/update! conn (keyword table) {:value s} ["id = ?" row-id])]
-      (when (zero? n)
-        (jdbc/insert! conn (keyword table) {:id row-id :value s}))
-      v))
+    ;; one upsert statement: atomic, and no update-then-insert race with another
+    ;; process writing the same row
+    (jdbc/execute! conn [(str "insert into " table " (id, value) values (?, ?)"
+                              " on conflict (id) do update set value = excluded.value")
+                         row-id (write-fn v)])
+    v)
   (clear! [_]
-    (jdbc/delete! conn (keyword table) ["id = ?" row-id])
+    (jdbc/execute! conn [(str "delete from " table " where id = ?") row-id])
     nil)
   (close-backend [_]
     (.close conn)
@@ -64,14 +88,21 @@
     (some? (jdbc/fetch-one conn [(str "select id from " table " where id = ?") row-id]))))
 
 (defn sql-backend
-  "A backend that persists a single EDN value to `table` (columns id, value) over
-  a jolt-lang/db connection spec: a \"sqlite:path\" / \"sqlite::memory:\" string,
-  a `{:vendor :sqlite :name ...}` map, or a postgres uri. Creates the table if
+  "A backend that persists a single value to `table` (columns id, value) over a
+  jolt-lang/db connection spec: a \"sqlite:path\" / \"sqlite::memory:\" string, a
+  `{:vendor :sqlite :name ...}` map, or a postgres uri. Creates the table if
   missing. The connection is held open for the backend's lifetime, so an
-  in-memory sqlite spec keeps its data across mutations."
-  ([dbspec table] (sql-backend dbspec table 0))
-  ([dbspec table row-id]
+  in-memory sqlite spec keeps its data across mutations.
+
+  `rw` may supply `:write` (fn [value] -> column value), `:read` (its inverse)
+  and `:column-type` (default \"text\"); the default is EDN text."
+  ([dbspec table] (sql-backend dbspec table 0 nil))
+  ([dbspec table row-id] (sql-backend dbspec table row-id nil))
+  ([dbspec table row-id {:keys [read write column-type]}]
    (let [conn (jdbc/connection dbspec)]
      (jdbc/execute! conn (str "create table if not exists " table
-                              " (id integer primary key, value text not null)"))
-     (->SQLBackend dbspec table row-id conn))))
+                              " (id integer primary key, value "
+                              (name (or column-type "text")) " not null)"))
+     (->SQLBackend table row-id conn
+                   (or read ut/read-edn-string)
+                   (or write ut/pr-str-fully)))))

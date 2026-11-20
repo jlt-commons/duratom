@@ -1,18 +1,28 @@
 (ns duratom.utils
   "EDN serialization and file IO shared by the duratom backends."
   (:require [clojure.edn :as edn]
+            [duratom.readers :as readers]
             [jolt.fs :as fs]))
 
 (def edn-opts
-  "EDN read options: return nil at end of input, so an empty file reads as nil."
-  {:eof nil})
+  "EDN read options: duratom's tagged readers, and nil at end of input so an
+  empty file reads as nil."
+  (assoc readers/default :eof nil))
 
 (defn pr-str-fully
-  "`pr-str` with printing limits unbound, so large collections serialize whole."
+  "`pr-str` with printing limits and metadata printing off, so large
+  collections serialize whole and read back as EDN. A value carrying metadata
+  prints as #duratom/iobj [value meta], so its metadata survives the trip
+  (only the top level's, as in jimpil/duratom)."
   [& xs]
   (binding [*print-length* nil
-            *print-level*  nil]
-    (apply pr-str xs)))
+            *print-level*  nil
+            *print-meta*   nil]
+    (apply pr-str (map (fn [x]
+                         (if-some [m (meta x)]
+                           (tagged-literal 'duratom/iobj [(with-meta x nil) m])
+                           x))
+                       xs))))
 
 (defn read-edn-string
   "Read one EDN value from string `s`; nil on empty input."
@@ -20,23 +30,20 @@
   (edn/read-string edn-opts s))
 
 (defn write-edn-file
-  "Serialize `data` as EDN to `path` via a temp file + atomic rename."
+  "Serialize `data` as EDN to `path`. Returns `path`."
   [path data]
-  (let [tmp (str path ".tmp")]
-    (spit tmp (pr-str-fully data))
-    (fs/move tmp path {:replace-existing true})
-    path))
+  (spit path (pr-str-fully data))
+  path)
 
-(defn edn-file-present?
+(defn file-present?
   "True when `path` exists and is non-empty, so it holds a value (nil included)."
   [path]
   (and (fs/exists? path) (pos? (fs/size path))))
 
 (defn read-edn-file
-  "Read one EDN value from `path`; nil when the file is absent or empty."
+  "Read one EDN value from `path`."
   [path]
-  (when (edn-file-present? path)
-    (read-edn-string (slurp path))))
+  (read-edn-string (slurp path)))
 
 (defn ->init
   "Resolve an initial-value spec: call a fn, force a delay, else return as-is."
