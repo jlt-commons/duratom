@@ -1,6 +1,6 @@
 # Change Log
 
-## [Unreleased]
+## [0.2.0] - 2026-11-20
 ### Added
 - `:commit-mode :async`: writes run on a fiber pool off the caller's thread and
   coalesce to the latest value. `flush!` waits for them.
