@@ -4,9 +4,9 @@
 
   Because it implements `glimmer.ratom/IReactiveCell`, a duratom works everywhere
   a glimmer atom does — @, reset!, swap!, cursor, reaction — while persisting
-  every change to its backend. It also answers the rest of the clojure.core
-  reference API: swap-vals!, reset-vals!, compare-and-set!, add-watch,
-  remove-watch, set-validator! and get-validator.
+  every change to its backend. It also implements clojure.lang.IAtom, IAtom2
+  and IRef, so swap-vals!, reset-vals!, compare-and-set!, add-watch,
+  remove-watch, set-validator! and get-validator work on it.
 
   Commits are synchronous by default: swap! returns once the value is stored,
   and a failed write throws to the caller. With `:commit-mode :async`, swap!
@@ -16,18 +16,6 @@
             [duratom.backends :as backends]
             [duratom.utils :as ut]
             [jolt.fibers :as fib]))
-
-;; Captured before this namespace rebinds the clojure.core reference fns (at the
-;; bottom), so the internals below always reach the host implementations.
-(defonce ^:private host-swap! clojure.core/swap!)
-(defonce ^:private host-reset! clojure.core/reset!)
-(defonce ^:private host-swap-vals! clojure.core/swap-vals!)
-(defonce ^:private host-reset-vals! clojure.core/reset-vals!)
-(defonce ^:private host-compare-and-set! clojure.core/compare-and-set!)
-(defonce ^:private host-add-watch clojure.core/add-watch)
-(defonce ^:private host-remove-watch clojure.core/remove-watch)
-(defonce ^:private host-set-validator! clojure.core/set-validator!)
-(defonce ^:private host-get-validator clojure.core/get-validator)
 
 (defn- released-error []
   (IllegalStateException. "duratom/duragent has been released!"))
@@ -55,7 +43,7 @@
 
 (defn- mark-written!
   [cstate seq]
-  (host-swap! cstate (fn [s] (if (>= seq (:written s)) (assoc s :written seq :error nil) s))))
+  (swap! cstate (fn [s] (if (>= seq (:written s)) (assoc s :written seq :error nil) s))))
 
 (defn- async-recommit
   "Persist the latest queued value now, on the caller's thread."
@@ -76,26 +64,26 @@
             (backends/persist! backend val)
             (mark-written! cstate seq)
             (catch Throwable e
-              (host-swap! cstate assoc :error e)
+              (swap! cstate assoc :error e)
               (when handler
                 ;; a throwing handler must not kill the writer
                 (try (handler e (async-recommit dura)) (catch Throwable _ nil)))))
           ;; idle only if nothing was queued while writing; enqueue! sees
           ;; :running false and starts a fresh writer
-          (let [[_ s] (host-swap-vals! cstate
+          (let [[_ s] (swap-vals! cstate
                                        (fn [s] (if (= seq (:seq s)) (assoc s :running false) s)))]
             (when (:running s) (recur)))))
       (finally
-        (host-swap! inflight dec)))))
+        (swap! inflight dec)))))
 
 (defn- enqueue!
   "Queue `v` for the writer. Called under the duratom's lock, so values queue in
   the order they were set."
   [dura v]
-  (let [[old _] (host-swap-vals! (:cstate dura)
+  (let [[old _] (swap-vals! (:cstate dura)
                                  (fn [s] (assoc s :seq (inc (:seq s)) :val v :running true)))]
     (when-not (:running old)
-      (host-swap! inflight inc)
+      (swap! inflight inc)
       (fib/spawn #(run-writer dura) {:pool (or (:pool (:opts dura)) @default-pool)}))))
 
 ;; --- state transitions --------------------------------------------------------
@@ -130,17 +118,17 @@
   (let [{:keys [backend state opts]} dura]
     (try
       (backends/persist! backend new)
-      (host-reset! state new)
+      (reset! state new)
       (catch Throwable e
         (if-let [handler (:error-handler opts)]
-          (do (host-reset! state new)
+          (do (reset! state new)
               (try (handler e (fn recommit [] (backends/persist! backend @state)))
                    (catch Throwable _ nil)))
           (throw e))))))
 
 (defn- apply-change! [dura new]
   (if (async? dura)
-    (do (host-reset! (:state dura) new)
+    (do (reset! (:state dura) new)
         (enqueue! dura new))
     (commit-sync! dura new)))
 
@@ -188,11 +176,32 @@
   ratom/IReactiveCell
   (-value [this] (current-value this))
   (-reset! [this v] (transition! this (constantly v)) v)
-  (-add-watch! [_ w] (host-swap! watches conj w))
-  (-remove-watch! [_ w] (host-swap! watches disj w))
+  (-add-watch! [_ w] (swap! watches conj w))
+  (-remove-watch! [_ w] (swap! watches disj w))
   (-notify-watches! [this] (doseq [w @watches] (w this)))
   ratom/IAtomicSwap
   (-swap! [this f] (second (transition! this f)))
+  clojure.lang.IAtom
+  (swap [this f] (second (transition! this f)))
+  (swap [this f a] (second (transition! this #(f % a))))
+  (swap [this f a b] (second (transition! this #(f % a b))))
+  (swap [this f a b args] (second (transition! this #(apply f % a b args))))
+  (reset [this v] (transition! this (constantly v)) v)
+  (compareAndSet [this oldv newv] (cas! this oldv newv))
+  clojure.lang.IAtom2
+  (swapVals [this f] (transition! this f))
+  (swapVals [this f a] (transition! this #(f % a)))
+  (swapVals [this f a b] (transition! this #(f % a b)))
+  (swapVals [this f a b args] (transition! this #(apply f % a b args)))
+  (resetVals [this v] (transition! this (constantly v)))
+  clojure.lang.IRef
+  (setValidator [this f]
+    (validate! f (current-value this))
+    (reset! validator f))
+  (getValidator [_] @validator)
+  (getWatches [_] @key-watches)
+  (addWatch [this k f] (swap! key-watches assoc k f) this)
+  (removeWatch [this k] (swap! key-watches dissoc k) this)
   java.io.Closeable
   (close [this] (destroy this)))
 
@@ -244,12 +253,12 @@
                           :cstate (when (= :async (:commit-mode opts))
                                     (atom {:seq 0 :val nil :written 0 :running false :error nil}))})]
      (if-let [[stored] (backends/stored-state backend)]
-       (host-reset! (:state d) stored)
+       (reset! (:state d) stored)
        (let [v (ut/->init init)]
          ;; persisted directly: the state starts at nil, so going through the
          ;; transition would skip an init of nil as unchanged
          (backends/persist! backend v)
-         (host-reset! (:state d) v)))
+         (reset! (:state d) v)))
      d)))
 
 (defn flush!
@@ -275,7 +284,7 @@
   [dura clear?]
   (when (locking (:lock dura)
           (when-not @(:released dura)
-            (host-reset! (:released dura) true)
+            (reset! (:released dura) true)
             true))
     ;; let a pending async write land before clearing, or it would recreate
     ;; the storage afterwards
@@ -403,51 +412,3 @@
 (defmethod duragent :postgres-db [_ & {:keys [db-config table-name row-id init rw meta]}]
   (make-duragent (backends/sql-backend db-config table-name (or row-id 0) rw) init
                  {:error-handler (:error-handler rw) :meta meta}))
-
-;; --- clojure.core reference fns -------------------------------------------------
-;; jolt's swap-vals!, compare-and-set!, add-watch and the validator fns only
-;; accept its built-in reference types, even for a type that implements
-;; clojure.lang.IAtom / IRef. glimmer.ratom rebinds deref/reset!/swap! for the
-;; same reason; these rebind the rest, delegating everything that is not a
-;; duratom to the host fn.
-
-(defonce ^:no-doc core-fns-installed
-  (do
-    (alter-var-root #'clojure.core/swap-vals!
-                    (fn [_] (fn [r f & args]
-                              (if (duratom? r)
-                                (transition! r #(apply f % args))
-                                (apply host-swap-vals! r f args)))))
-    (alter-var-root #'clojure.core/reset-vals!
-                    (fn [_] (fn [r v]
-                              (if (duratom? r)
-                                (transition! r (constantly v))
-                                (host-reset-vals! r v)))))
-    (alter-var-root #'clojure.core/compare-and-set!
-                    (fn [_] (fn [r oldv newv]
-                              (if (duratom? r)
-                                (cas! r oldv newv)
-                                (host-compare-and-set! r oldv newv)))))
-    (alter-var-root #'clojure.core/add-watch
-                    (fn [_] (fn [r k f]
-                              (if (duratom? r)
-                                (do (host-swap! (:key-watches r) assoc k f) r)
-                                (host-add-watch r k f)))))
-    (alter-var-root #'clojure.core/remove-watch
-                    (fn [_] (fn [r k]
-                              (if (duratom? r)
-                                (do (host-swap! (:key-watches r) dissoc k) r)
-                                (host-remove-watch r k)))))
-    (alter-var-root #'clojure.core/set-validator!
-                    (fn [_] (fn [r f]
-                              (if (duratom? r)
-                                (do (validate! f (current-value r))
-                                    (host-reset! (:validator r) f)
-                                    nil)
-                                (host-set-validator! r f)))))
-    (alter-var-root #'clojure.core/get-validator
-                    (fn [_] (fn [r]
-                              (if (duratom? r)
-                                @(:validator r)
-                                (host-get-validator r)))))
-    true))

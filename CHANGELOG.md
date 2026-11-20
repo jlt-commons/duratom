@@ -7,7 +7,8 @@
 - `:error-handler` with recommit, `:read-from :storage`, and pluggable
   `:read`/`:write` serialization for the file and SQL backends.
 - `swap-vals!`, `reset-vals!`, `compare-and-set!`, `add-watch`, `remove-watch`,
-  `set-validator!`/`get-validator` and `with-open` work on a duratom.
+  `set-validator!`/`get-validator` and `with-open` work on a duratom: it
+  implements `IAtom`, `IAtom2` and `IRef`. Needs jolt 0.8.28.
 - `duratom` and `duragent` multimethod constructors (`:local-file`,
   `:sqlite-db`, `:postgres-db`), `make-duragent`, and `release`.
 - Sorted maps and sets, queues and top-level metadata survive a write and read

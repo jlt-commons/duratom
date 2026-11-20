@@ -8,6 +8,8 @@ change is written through to storage.
 
 ## Install
 
+Needs jolt 0.8.28 or later.
+
 ```clojure
 ;; deps.edn
 {:deps {io.github.jlt-commons/duratom
@@ -92,10 +94,8 @@ files elsewhere. These printers apply to every `pr` in the process.
 
 A duratom answers `@`, `reset!`, `swap!`, `swap-vals!`, `reset-vals!`,
 `compare-and-set!`, `add-watch`, `remove-watch`, `set-validator!`,
-`get-validator`, `with-meta` and `with-open` (closing destroys it). jolt's
-built-in versions of these only accept its own reference types, so
-`duratom.core` rebinds them the way `glimmer.ratom` rebinds `deref`/`swap!`;
-anything that is not a duratom goes straight to the original fn.
+`get-validator`, `with-meta` and `with-open` (closing destroys it): it
+implements `clojure.lang.IAtom`, `IAtom2` and `IRef`.
 
 After `destroy` (or `release`, which keeps the stored value and only closes the
 backend) the value stays readable and every write throws

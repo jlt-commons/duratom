@@ -6,28 +6,24 @@
   tagged. A sorted collection reads back with the default comparator."
   (:import (clojure.lang PersistentTreeMap PersistentTreeSet PersistentQueue)))
 
-(defn- print-elements [^java.io.Writer w open close print-one xs]
-  (.write w open)
-  (loop [xs (seq xs) first? true]
-    (when xs
-      (when-not first? (.write w " "))
-      (print-one (first xs))
-      (recur (next xs) false)))
-  (.write w close))
+;; The built-in printers for the abstractions, so a tagged collection prints its
+;; body the way the host does (as upstream borrows them).
+(def ^:private map-print-method (get (methods print-method) clojure.lang.IPersistentMap))
+(def ^:private set-print-method (get (methods print-method) clojure.lang.IPersistentSet))
+(def ^:private vector-print-method (get (methods print-method) clojure.lang.IPersistentVector))
 
-(defmethod print-method PersistentTreeMap [m ^java.io.Writer w]
-  (.write w "#sorted/map ")
-  (print-elements w "{" "}"
-                  (fn [[k v]] (print-method k w) (.write w " ") (print-method v w))
-                  m))
+(defmethod print-method PersistentTreeMap [m w]
+  (.write ^java.io.Writer w "#sorted/map ")
+  (map-print-method m w))
 
-(defmethod print-method PersistentTreeSet [s ^java.io.Writer w]
-  (.write w "#sorted/set ")
-  (print-elements w "#{" "}" #(print-method % w) s))
+(defmethod print-method PersistentTreeSet [s w]
+  (.write ^java.io.Writer w "#sorted/set ")
+  (set-print-method s w))
 
-(defmethod print-method PersistentQueue [q ^java.io.Writer w]
-  (.write w "#queue ")
-  (print-elements w "[" "]" #(print-method % w) q))
+(defmethod print-method PersistentQueue [q w]
+  (.write ^java.io.Writer w "#queue ")
+  ;; jolt's vector printer takes only vectors; upstream's takes any sequential
+  (vector-print-method (vec q) w))
 
 (def sorted-readers
   "EDN readers for #sorted/map and #sorted/set."
